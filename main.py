@@ -8,9 +8,9 @@ ti.init(arch=ti.cuda, random_seed=int(time.time()))
 width = 800
 height = 800
 ratio = width/height
-amount = 100
+amount = 400
 types = 3
-rad = 5
+rad = 2
 
 positions = ti.Vector.field(2, dtype=float, shape=(types, amount))
 velocities = ti.Vector.field(2, dtype=float, shape=(types, amount))
@@ -94,7 +94,6 @@ def render3():
         gui.circles(np_pos[i * amount: (i + 1) * amount], radius=rad, color=colors[i])
         # gui.circles(np_pos[i * amount: (i + 1) * amount], radius=rad, color=colors[i])
     gui.show()
-
 
 init()
 # printPos()
