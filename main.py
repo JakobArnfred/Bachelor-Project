@@ -2,15 +2,15 @@ import taichi as ti
 import time
 
 
-ti.init(arch=ti.cuda, random_seed=int(time.time()))
+ti.init(arch=ti.gpu, random_seed=int(time.time()))
 # window = ti.ui.Window(name='window', res = (1000, 1000), fps_limit=200, pos = (150, 150))
 
 width = 800
 height = 800
 ratio = width/height
-amount = 400
+amount = 5000
 types = 3
-rad = 2
+rad = 1
 
 positions = ti.Vector.field(2, dtype=float, shape=(types, amount))
 velocities = ti.Vector.field(2, dtype=float, shape=(types, amount))
@@ -35,33 +35,86 @@ def printPos():
 def init():
     for i, j in ti.ndrange(types, amount):
         positions[i, j] = [ti.random(), ti.random()]
-        velocities[i, j] = [ti.randn()/width, ti.randn()/height]
-        # velocities[i, j] = [0.001, 0.001]
-    forces[0, 0] = 0.00000005
-    forces[1, 1] = 0.00000005
-    forces[2, 2] = 0.00000005
-    forces[2, 1] = -0.00000005
+        # velocities[i, j] = [ti.randn()/width, ti.randn()/height]
+        velocities[i, j] = [0.0, 0.0]
+    forces[0, 0] = 0.0001
+    forces[0, 1] = -0.00001
+    forces[1, 0] = 0.00001
+    forces[1, 1] = 0.00001
+    forces[2, 2] = 0.00001
+    forces[2, 1] = -0.00001
+    forces[2, 0] = -0.00001
+    # forces[0, 0] = 0.5
+    # forces[1, 1] = 0.5
+    # forces[2, 2] = 0.5
+    # forces[2, 1] = -0.5
 
 @ti.kernel
 def update_vel():
     ti.loop_config(block_dim=512)
     for i, j in ti.ndrange(types, amount):
         force_acc = ti.Vector([0.0, 0.0])
+        pos1 = positions[i, j]
         for iOther, jOther in ti.ndrange(types, amount):
             if i != iOther or j != jOther:
                 # force = forces[i, iOther]
-                dir = positions[iOther, jOther] - positions[i, j]
-                dist = dir.norm_sqr() + 1e-5
-                force = forces[i, iOther] / dist
-                force_acc += dir * (force / ti.sqrt(dist))
-        # velocities[i, j] = (velocities[i, j] + dir*force) 
-        velocities[i, j] += force_acc
+                dir = positions[iOther, jOther] - pos1
+                dist_sqr = dir.norm_sqr() + 1e-5
+                dist = ti.sqrt(dist_sqr)
+                
+                # # dist = ti.sqrt(dist_sqr)
+                # if dist < (4.0 * rad / width):
+                #     n = dir.normalized()
+                #     oldVel = velocities[i, j]
+                #     velocities[i, j] = oldVel - 1 * oldVel.dot(n) * n
                     
+                #     dir2 = -dir
+                #     n2 = dir2.normalized()
+                #     oldVel2 = velocities[iOther, jOther]
+                #     velocities[iOther, jOther] = oldVel2 - 1 * oldVel2.dot(n2) * n2
+                    
+                #     overlap = (4.0 * rad / width) - dist
+                #     push = 0.5 * overlap * n
+                #     positions[i, j] -= push
+                #     positions[iOther, jOther] += push
+                
+                force = forces[i, iOther] / dist_sqr
+                force_acc += dir * (force / dist)
+                    
+        velocities[i, j] += force_acc / width
+
+@ti.kernel
+def check_coll():
+    ti.loop_config(block_dim=512)
+    for i, j in ti.ndrange(types, amount):
+        force_acc = ti.Vector([0.0, 0.0])
+        pos1 = positions[i, j]
+        for iOther, jOther in ti.ndrange(types, amount):  
+            if i != iOther or j != jOther:
+                dir = positions[iOther, jOther] - pos1
+                dist_sqr = dir.norm_sqr() + 1e-5
+                dist = ti.sqrt(dist_sqr)
+                
+                if dist < (4.0 * rad / width):
+                    n = dir.normalized()
+                    oldVel = velocities[i, j]
+                    velocities[i, j] = oldVel - 1.65 * oldVel.dot(n) * n
+                    
+                    dir2 = -dir
+                    n2 = dir2.normalized()
+                    oldVel2 = velocities[iOther, jOther]
+                    velocities[iOther, jOther] = oldVel2 - 1.65 * oldVel2.dot(n2) * n2
+                    
+                    overlap = (4.0 * rad / width) - dist
+                    push = 0.5 * overlap * n
+                    positions[i, j] -= push
+                    positions[iOther, jOther] += push        
 
 @ti.kernel
 def move():
     for i, j in ti.ndrange(types, amount):
         newPos = positions[i, j] + velocities[i, j]
+                
         positions[i, j] = ti.Vector([
             max(0.0, min(newPos.x, 1.0)), 
             max(0.0, min(newPos.y, 1.0))
@@ -69,22 +122,6 @@ def move():
         # positions[i, j] += velocities[i, j]
         # positions[i, j].x = max(0.0, min(positions[i, j].x, 1.0))
         # positions[i, j].y = max(0.0, min(positions[i, j].y, 1.0))
-
-# def render():
-#     gui.clear(0x000000)
-#     np_pos = positions.to_numpy()
-    
-#     for i in range(types):
-#         for j in range(amount):
-#             gui.circle(pos=np_pos[i, j], radius=rad, color=colors[i])
-#             gui.circles
-#     gui.show()
-    
-# def render2():
-#     canvas.set_background_color((0.0, 0.0, 0.0))
-#     np_pos = positions.to_numpy().reshape(-1, 2)
-#     for i in range (types):
-#         canvas.circles(np_pos[i * amount: (i + 1) * amount]).radius(rad).color(colors[i])
 
 def render3():
     gui.clear(0x000000)
@@ -103,6 +140,7 @@ while gui.running:
 # while window.running:
     # gui.set_image()
     update_vel()
+    check_coll()
     move()
     # render()
     render3()
