@@ -6,31 +6,25 @@ import time
 ti.init(arch=ti.gpu, random_seed=int(time.time()))
 # window = ti.ui.Window(name='window', res = (1000, 1000), fps_limit=200, pos = (150, 150))
 
-width = 800
+width = 1200
 height = 800
 ratio = width/height
-amount = 80
-types = 1
-rad = 2
+amount = 200
+types = 2
+rad = 1
 max_speed = 0.005
-sigma = 3 * rad / width
-epsilon = 0.5
+sigma = 1 * rad / width
+epsilon = 0.1
+boxHeight = 0.4
+boxWidth = 0.35
+foodAmount = 20
 
 
 positions = ti.Vector.field(2, dtype=float, shape=(types, amount))
 velocities = ti.Vector.field(2, dtype=float, shape=(types, amount))
 forces = ti.field(float, shape=(types, types))
 colors = [0xff0000, 0x00ff00, 0x0000ff, 0xff8800]
-# colors = [
-#     (1.0, 0.0, 0.0),  # Red
-#     (0.0, 1.0, 0.0),  # Green
-#     (0.0, 0.0, 1.0),  # Blue
-#     (1.0, 0.5, 0.0)   # Orange
-# ]
-gui = ti.GUI("Particle Life", res=(width, height))
-# window = ti.ui.Window(name='Particle Life', res=(width, height), fps_limit=60)
-
-# canvas = window.get_canvas()
+gui = ti.GUI("Particle Life", res=(width, height), background_color=0x000000)
 
 def printPos():
     for i, j in ti.ndrange(types, amount):
@@ -38,17 +32,23 @@ def printPos():
 
 @ti.kernel
 def init():
-    for i, j in ti.ndrange(types, amount):
-        positions[i, j] = [ti.random()*0.25, (ti.random()*0.5)+0.5]
+    # for i, j in ti.ndrange(types, amount):
+    #     positions[i, j] = [ti.random()*0.25, (ti.random()*0.5)+0.5]
+    #     # velocities[i, j] = [ti.randn()/width, ti.randn()/height]
+    #     velocities[i, j] = [0.0, 0.0]
+    for j in range(amount):
+        positions[0, j] = [ti.random()*0.25, (ti.random()*0.5) + boxHeight + 0.05]
         # velocities[i, j] = [ti.randn()/width, ti.randn()/height]
-        velocities[i, j] = [0.0, 0.0]
-    forces[0, 0] = 0.0005
-    forces[0, 1] = -0.00001
-    forces[1, 0] = 0.00001
-    forces[1, 1] = 0.00001
-    forces[2, 2] = 0.00001
-    forces[2, 1] = -0.00001
-    forces[2, 0] = -0.00001
+        velocities[0, j] = [0.0, 0.0]
+    for k in range(foodAmount):
+        positions[1, k] = [ti.random()*0.25 + 0.75, ti.random()*0.5 + boxHeight+0.05]
+        velocities[1, k] = [0.0, 0.0]
+    forces[0, 0] = 1
+    forces[0, 1] = 0
+    forces[1, 0] = 0
+    forces[1, 1] = 1
+        
+    
     # forces[0, 0] = 0.5
     # forces[1, 1] = 0.5
     # forces[2, 2] = 0.5
@@ -71,10 +71,21 @@ def update_vel():
                 
                 repulsive_force = (sigma**12) / (dist_sqr**6)
                 attraction_force = (sigma**6) / (dist_sqr**3)
+                
+                force_Mult = forces[i, iOther]
+                newEpsilon = epsilon * force_Mult
+                
+                # if force_Mult < 0 and dist <= sigma:
+                #     newEpsilon = epsilon * force_Mult
+                # else:
+                #     newEpsilon = epsilon * force_Mult
 
-                result_force = 24 * epsilon * (2 * repulsive_force - attraction_force) / dist_sqr
+                result_force = 24 * newEpsilon * (2 * repulsive_force - attraction_force) / dist
                 endForce = result_force * dir.normalized()
                 
+                if force_Mult < 0:
+                    endForce = -abs(result_force) * dir.normalized()
+                    
                 # if (endForce > 0):
                 #     endForce *= 10
 
@@ -86,7 +97,7 @@ def update_vel():
 
                 # force_acc += dir * (att_force / dist)
                     
-        force_acc += ti.Vector([0.0, -0.8])
+        force_acc += ti.Vector([0.0, -0.9])
         velocities[i, j] += force_acc / width
         speed = velocities[i, j].norm()
         if speed > max_speed:
@@ -122,12 +133,24 @@ def check_coll():
 @ti.kernel
 def move():
     for i, j in ti.ndrange(types, amount):
+        oldPos = positions[i, j]
         newPos = positions[i, j] + velocities[i, j]
-                
-        positions[i, j] = ti.Vector([
-            max(0.0, min(newPos.x, 1.0)), 
-            max(0.0, min(newPos.y, 1.0))
-        ])
+
+        if oldPos.x >= boxWidth and oldPos.x <= 1-boxWidth and oldPos.y < boxHeight:
+            positions[i, j] = ti.Vector([
+                max(boxWidth, min(newPos.x, 1-boxWidth)), 
+                max(0.0, min(newPos.y, 1.0))
+            ])
+        elif oldPos.x < boxWidth or oldPos.x > 1-boxWidth:
+            positions[i, j] = ti.Vector([
+                max(0.0, min(newPos.x, 1.0)), 
+                max(boxHeight, min(newPos.y, 1.0))
+            ])
+        else:
+            positions[i, j] = ti.Vector([
+                max(0.0, min(newPos.x, 1.0)), 
+                max(0.0, min(newPos.y, 1.0))
+            ])
         # positions[i, j] += velocities[i, j]
         # positions[i, j].x = max(0.0, min(positions[i, j].x, 1.0))
         # positions[i, j].y = max(0.0, min(positions[i, j].y, 1.0))
@@ -148,10 +171,12 @@ def render3():
     p1 = [0.4, 0.0]
     p2 = [0.4, 0.4]
     p3 = [0.0, 0.4]
-    drawRectangle(p0, p1, p2, p3, 0xAAAAAA)
+    # drawRectangle(p0, p1, p2, p3, 0xAAAAAA)
+    # gui.rect([0.5, 0.5], [0.6, 0.4], 0xAAAAAA)
     
 
-    # gui.rect([0, 0], [0.4, 0.4], 1, color=0x999999)
+    gui.rect([0, 0], [boxWidth, boxHeight], 1, color=0xAAAAAA)
+    gui.rect([1-boxWidth, 0], [1, boxHeight], 1, color=0xAAAAAA)
 
     for i in range(types):
         gui.circles(np_pos[i * amount: (i + 1) * amount], radius=rad, color=colors[i])
