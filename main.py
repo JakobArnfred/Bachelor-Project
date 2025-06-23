@@ -1,28 +1,30 @@
 import taichi as ti
 import numpy as np
 import time
+import random
 
 
-ti.init(arch=ti.cpu, random_seed=int(time.time()))
+ti.init(arch=ti.cuda, random_seed=int(time.time()))
 # window = ti.ui.Window(name='window', res = (1000, 1000), fps_limit=200, pos = (150, 150))
 
-width = 1600
-height = 800
+width = 900
+height = 600
 ratio = width/height
-amount = 100
+amount = 80
 types = 2
 rad = 2
-max_speed = 0.01
-gravity = 0.001
-sigma = 40 * rad / width
-epsilon = 1
+max_speed = 0.0025
+gravity = 0.0005
+sigma = 25 * rad / width
+epsilon = 10
 boxHeight = 0.4
-boxWidth = 0.35
-foodAmount = 40
+boxWidth = 0.4
+foodAmount = 20
 
 
 positions = ti.Vector.field(2, dtype=float, shape=(types, amount))
 velocities = ti.Vector.field(2, dtype=float, shape=(types, amount))
+alive = ti.field(bool, shape=(types, amount))
 forces = ti.field(float, shape=(types, types))
 colors = [0xff0000, 0x00ff00, 0x0000ff, 0xff8800]
 gui = ti.GUI("Particle Life", res=(width, height), background_color=0x000000)
@@ -31,53 +33,71 @@ def printPos():
     for i, j in ti.ndrange(types, amount):
         print(positions[i, j])
 
-@ti.kernel
+
 def init():
     # for i, j in ti.ndrange(types, amount):
     #     positions[i, j] = [ti.random()*0.25, (ti.random()*0.5)+0.5]
     #     # velocities[i, j] = [ti.randn()/width, ti.randn()/height]
     #     velocities[i, j] = [0.0, 0.0]
+    # print(velocities[0, 0])
     for j in range(amount):
-        positions[0, j] = [ti.random()*boxWidth, (ti.random()*0.5) + boxHeight + 0.05]
+        positions[0, j] = [random.random()*boxWidth, (random.random()*0.5) + boxHeight + 0.05]
         # velocities[i, j] = [ti.randn()/width, ti.randn()/height]
         velocities[0, j] = [0.0, 0.0]
+        alive[0, j] = True
         # print("k", velocities[0, 0])
+        # print(j)
     for k in range(foodAmount):
-        # print(1, velocities[0, 0])
-        positions[1, k] = [ti.random()*boxWidth + (1-boxWidth), ti.random()*0.5 + boxHeight+0.05]
-        # print(2, velocities[0, 0])
+        positions[1, k] = [random.random()*boxWidth + (1-boxWidth), random.random()*0.5 + boxHeight+0.05]
         velocities[1, k] = [0.0, 0.0]
-        # print(3, velocities[0, 0])
+        alive[1, k] = True
     # print(velocities[0, 0])
-    forces[0, 0] = -0.1
+    # for k in range(foodAmount):
+    #     # print(1, velocities[0, 0])
+    #     positions[1, k] = [ti.random()*boxWidth + (1-boxWidth), ti.random()*0.5 + boxHeight+0.05]
+    #     # print(2, velocities[0, 0])
+    #     velocities[1, k] = [0.0, 0.0]
+    #     # print(3, velocities[0, 0])
+    # print(velocities[0, 0])
+    forces[0, 0] = -0.8
     forces[0, 1] = -1
-    forces[1, 0] = 0
-    forces[1, 1] = -0.1
-        
+    forces[1, 0] = 0.03
+    forces[1, 1] = -1
+    
+    # print(velocities[0, 0])
     # print(velocities[0, 0])
     # forces[0, 0] = 0.5
     # forces[1, 1] = 0.5
     # forces[2, 2] = 0.5
     # forces[2, 1] = -0.5
+    # print(velocities[0, 0])
 
+
+        
 @ti.kernel
 def update_vel():
     ti.loop_config(block_dim=512)
 
     for i, j in ti.ndrange(types, amount):
-        if i == 1 and j > foodAmount-1:
+        if i == 1 and j > foodAmount-1 or alive[i, j] == False:
             continue
         force_acc = ti.Vector([0.0, 0.0])
         pos1 = positions[i, j]
 
         for iOther, jOther in ti.ndrange(types, amount):
-            if iOther == 1 and jOther > foodAmount-1:
+            if iOther == 1 and jOther > foodAmount-1 or alive[i, j] == False:
                 continue
             if i != iOther or j != jOther:
                 dir = positions[iOther, jOther] - pos1  # Vector from current to other particle 
                 dist_sqr = dir.norm_sqr() + 1e-10       # 
                 dist = ti.sqrt(dist_sqr)                # Distance between particles
                 r = dist                                # Distance to be used for function
+                
+                if i == 0 and iOther == 1 and r <= sigma:
+                    alive[iOther, jOther] = False
+                    positions[iOther, jOther] = [-1, -1]
+                    continue
+                    
                 # print(dir, dist_sqr, dist)
                 
                 # if (dist > 4*sigma):
@@ -198,6 +218,8 @@ def check_coll():
 @ti.kernel
 def move():
     for i, j in ti.ndrange(types, amount):
+        if i == 1 and j > foodAmount-1 or alive[i, j] == False:
+                continue
         oldPos = positions[i, j]
         newPos = positions[i, j] + velocities[i, j]
         vel = velocities[i, j]
@@ -256,16 +278,22 @@ def render3():
     gui.show()
 
 init()
+# initFood()
 # printPos()
+print("1", velocities[0, 0])
 timer = 0
+second = 0
 # gui.show()
 while gui.running:
 # while window.running:
     # gui.set_image()
     update_vel()
+    # print("2", velocities[0, 0])
     # check_coll()
     move()
     # render()
-    render3()
+    if second % 1 == 0:
+        render3()
+    second += 1   
     # gui.show()
     # window.show()
