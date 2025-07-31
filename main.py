@@ -2,6 +2,9 @@ import taichi as ti
 import numpy as np
 import time
 import random
+import optuna
+import optuna.visualization as vis
+
 
 
 ti.init(arch=ti.cuda, random_seed=int(time.time()))
@@ -10,15 +13,15 @@ ti.init(arch=ti.cuda, random_seed=int(time.time()))
 width = 900
 height = 600
 ratio = width/height
-amount = 80
+amount = 60
 types = 2
-rad = 2
-max_speed = 0.0025
-gravity = 0.0005
+rad = 5
+max_speed = 0.003
+gravity = 0.004
 sigma = 25 * rad / width
 epsilon = 10
 boxHeight = 0.4
-boxWidth = 0.4
+boxWidth = 0.375
 foodAmount = 20
 
 
@@ -29,10 +32,10 @@ forces = ti.field(float, shape=(types, types))
 colors = [0xff0000, 0x00ff00, 0x0000ff, 0xff8800]
 gui = ti.GUI("Particle Life", res=(width, height), background_color=0x000000)
 
+
 def printPos():
     for i, j in ti.ndrange(types, amount):
         print(positions[i, j])
-
 
 def init():
     # for i, j in ti.ndrange(types, amount):
@@ -277,23 +280,115 @@ def render3():
         # gui.circles(np_pos[i * amount: (i + 1) * amount], radius=rad, color=colors[i])
     gui.show()
 
-init()
-# initFood()
-# printPos()
-print("1", velocities[0, 0])
-timer = 0
-second = 0
-# gui.show()
-while gui.running:
-# while window.running:
-    # gui.set_image()
-    update_vel()
-    # print("2", velocities[0, 0])
-    # check_coll()
-    move()
-    # render()
-    if second % 1 == 0:
-        render3()
-    second += 1   
+def run():
+    init()
+    # initFood()
+    # printPos()
+    print("1", velocities[0, 0])
+    timer = 0
+    second = 0
     # gui.show()
-    # window.show()
+    while gui.running:
+    # while window.running:
+        # gui.set_image()
+        update_vel()
+        # print("2", velocities[0, 0])
+        # check_coll()
+        move()
+        # render()
+        if second % 1 == 0:
+            render3()
+        second += 1   
+        # gui.show()
+        # window.show()
+
+@ti.kernel
+def cntEaten() -> int:
+    cnt = 0
+    for j in ti.ndrange(foodAmount):
+        if not alive[1, j]:
+            cnt += 1
+    print(cnt)
+    return cnt
+
+@ti.kernel
+def particleCloseReward(maxPoints: int) -> int: 
+    maxDist = ti.sqrt(boxHeight + boxWidth)
+    reward = 0
+    for j in ti.ndrange(amount):
+        particlePos = positions[0, j]
+        distSum = 0
+        aliveCnt = 0
+        for jj in ti.ndrange(foodAmount):
+            # print("123", alive[1, jj])
+            if alive[1, jj]:
+                foodPos = positions[1, jj]
+                dir = foodPos - particlePos  # Vector from current to other particle 
+                dist_sqr = dir.norm_sqr() + 1e-10       
+                dist = ti.sqrt(dist_sqr)
+
+                distSum += dist
+                aliveCnt += 1
+        avgDist = distSum / aliveCnt
+        scaledDist = avgDist / maxDist
+        reward += (1 - scaledDist) * maxPoints
+    print("ParticleCloseReward = ", reward)
+    return reward
+
+
+
+            
+
+
+
+def objective(trial):
+    # Example: optimize forces[0,0]
+    force_00 = trial.suggest_float('force_00', -1.0, 1.0)
+    force_01 = trial.suggest_float('force_01', -1.0, 1.0)
+    
+    # Reset the simulation to the initial state
+    init()
+
+    # Apply to your force field
+    forces[0, 0] = force_00
+    forces[0, 1] = force_01
+
+    total_reward = 0.0
+
+    second = 0
+    # Run the simulation for N steps
+    for step in range(5000):
+        update_vel()
+        move()
+        # check_coll()  # Optional
+        # if second % 1 == 0:
+            # render3()
+        # second += 1 
+        
+        # Evaluate reward at each step
+        # Example: reward could be distance minimization between type 0 and type 1
+        # reward = compute_reward()
+        # total_reward += reward
+
+    total_reward += cntEaten() * 100
+    total_reward += particleCloseReward(1)
+
+    # Return cumulative reward (maximize this)
+    return total_reward
+
+def train():
+    study = optuna.create_study(direction='maximize')
+    study.optimize(objective, n_trials=50)
+
+    print("Best trial:")
+    trial = study.best_trial
+
+    print(f"  Value: {trial.value}")
+    print("  Params: ")
+    for key, value in trial.params.items():
+        print(f"    {key}: {value}")
+    
+    vis.plot_optimization_history(study).show()
+    vis.plot_param_importances(study).show()
+
+train()
