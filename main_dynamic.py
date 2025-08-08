@@ -75,7 +75,6 @@ def init():
     # forces[2, 1] = -0.5
     # print(velocities[0, 0])
 
-
         
 @ti.kernel
 def update_vel():

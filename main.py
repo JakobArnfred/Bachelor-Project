@@ -10,39 +10,34 @@ import optuna.visualization as vis
 ti.init(arch=ti.cuda, random_seed=int(time.time()))
 # window = ti.ui.Window(name='window', res = (1000, 1000), fps_limit=200, pos = (150, 150))
 
-width = 900
+width = 1800
 height = 600
 ratio = width/height
-amount = 60
-types = 2
-rad = 5
-max_speed = 0.003
-gravity = 0.004
-sigma = 25 * rad / width
-epsilon = 10
+rad = 3
+sigma = 40 * rad / width
+epsilon = 0.1
 boxHeight = 0.4
-boxWidth = 0.375
-foodAmount = 20
+boxWidth = 0.4
+types = 2
 
+#   Parameters for general physics
+amount = 500
+foodAmount = 30
+gravity = 0.1
+max_speed = 0.0035
+coll_range = 30          # Range for guranteed repulsion force in the unit for 'rad'
+coll_force = 300
+force_mult = 60         # Multiplier for stength of particle interaction forces
 
 positions = ti.Vector.field(2, dtype=float, shape=(types, amount))
 velocities = ti.Vector.field(2, dtype=float, shape=(types, amount))
 alive = ti.field(bool, shape=(types, amount))
 forces = ti.field(float, shape=(types, types))
-colors = [0xff0000, 0x00ff00, 0x0000ff, 0xff8800]
+colors = [0xff5050, 0x80ff80, 0x0000ff, 0xff8800]
 gui = ti.GUI("Particle Life", res=(width, height), background_color=0x000000)
 
 
-def printPos():
-    for i, j in ti.ndrange(types, amount):
-        print(positions[i, j])
-
 def init():
-    # for i, j in ti.ndrange(types, amount):
-    #     positions[i, j] = [ti.random()*0.25, (ti.random()*0.5)+0.5]
-    #     # velocities[i, j] = [ti.randn()/width, ti.randn()/height]
-    #     velocities[i, j] = [0.0, 0.0]
-    # print(velocities[0, 0])
     for j in range(amount):
         positions[0, j] = [random.random()*boxWidth, (random.random()*0.5) + boxHeight + 0.05]
         # velocities[i, j] = [ti.randn()/width, ti.randn()/height]
@@ -54,41 +49,26 @@ def init():
         positions[1, k] = [random.random()*boxWidth + (1-boxWidth), random.random()*0.5 + boxHeight+0.05]
         velocities[1, k] = [0.0, 0.0]
         alive[1, k] = True
-    # print(velocities[0, 0])
-    # for k in range(foodAmount):
-    #     # print(1, velocities[0, 0])
-    #     positions[1, k] = [ti.random()*boxWidth + (1-boxWidth), ti.random()*0.5 + boxHeight+0.05]
-    #     # print(2, velocities[0, 0])
-    #     velocities[1, k] = [0.0, 0.0]
-    #     # print(3, velocities[0, 0])
-    # print(velocities[0, 0])
-    forces[0, 0] = -0.8
-    forces[0, 1] = -1
-    forces[1, 0] = 0.03
-    forces[1, 1] = -1
-    
-    # print(velocities[0, 0])
-    # print(velocities[0, 0])
-    # forces[0, 0] = 0.5
-    # forces[1, 1] = 0.5
-    # forces[2, 2] = 0.5
-    # forces[2, 1] = -0.5
-    # print(velocities[0, 0])
+    forces[0, 0] = 0.1
+    forces[0, 1] = 0.9
+    forces[1, 0] = -0.02
+    forces[1, 1] = 1
 
-
-        
 @ti.kernel
-def update_vel():
-    ti.loop_config(block_dim=512)
-
+def update_vel2(tickCount: int):
+    # print(tickCount < 200)
     for i, j in ti.ndrange(types, amount):
         if i == 1 and j > foodAmount-1 or alive[i, j] == False:
             continue
         force_acc = ti.Vector([0.0, 0.0])
         pos1 = positions[i, j]
+        
+        acc = 0
 
         for iOther, jOther in ti.ndrange(types, amount):
-            if iOther == 1 and jOther > foodAmount-1 or alive[i, j] == False:
+            if i == 0 and iOther == 1 and tickCount < 200:
+                continue
+            if iOther == 1 and jOther > foodAmount-1 or alive[iOther, jOther] == False:
                 continue
             if i != iOther or j != jOther:
                 dir = positions[iOther, jOther] - pos1  # Vector from current to other particle 
@@ -98,43 +78,78 @@ def update_vel():
                 
                 if i == 0 and iOther == 1 and r <= sigma:
                     alive[iOther, jOther] = False
-                    positions[iOther, jOther] = [-1, -1]
+                    positions[iOther, jOther] = [-1, 1]
                     continue
-                    
-                # print(dir, dist_sqr, dist)
                 
-                # if (dist > 4*sigma):
-                #     r = ti.sqrt(ti.sqrt(dist))
-                # #     # print((4*sigma), dist)
+                result_force = 0.0
                 
-                # repulsive_force = (sigma**12) / (dist_sqr**6)
-                # attraction_force = (sigma**6) / (dist_sqr**3)
-                # if dist < 7*sigma:
-                #     m = 6.0
-                #     n = 4.0
-                #     temp = sigma / r
-                #     repulsive_force = temp ** m
-                #     attraction_force = temp ** n
-                    
-                    
-                #     rep_f = (sigma / dist)
-                    
-                #     force_Mult = forces[i, iOther]
-                #     newEpsilon = epsilon * force_Mult
-                    
-                #     result_force = newEpsilon * (m * repulsive_force - n * attraction_force) / r
-                #     endForce = result_force * dir.normalized()
+                # if r < (coll_range * forces[i, iOther]) * rad / width and i == iOther:
+                if r < (coll_range) * rad / width and i == iOther:
+                    result_force = -coll_force
+                else:
+                    result_force = force_mult * forces[i, iOther]
+                
+                endForce = result_force * dir.normalized()
 
+                force_acc += endForce
+                # if (result_force < 0):
+                #     # if result_force < 0.0000001: 
+                #         # print(dist)
                 #     force_acc += endForce
                 # else:
+                #     # print(dist)
                 #     force = -forces[i, iOther]
                 #     att_force = force / dist_sqr
 
                 #     force_acc += dir * (att_force / dist)
+                acc += 1
+                    
+                    
+        # force_acc += ti.Vector([0.0, -gravity]) * amount  
+        # if i == 1:
+        #     force_acc += ti.Vector([gravity, 0.0])
+            # print(j, positions[i, j], force_acc, acc)
+        
+        if ti.math.isnan(force_acc.x) or ti.math.isnan(force_acc.y):
+            force_acc = ti.Vector([0.0, 0.0])
+        
+        velocities[i, j] += force_acc / width
+        speed = velocities[i, j].norm()
+        if speed > max_speed:
+            velocities[i, j] = velocities[i, j].normalized() * max_speed
+        velocities[i, j] += ti.Vector([0.0, -gravity*0.015])
+        if i == 1:
+            velocities[i, j] += ti.Vector([gravity*0.015, 0.0])
+        
+@ti.kernel
+def update_vel(tickCount: int):
+    ti.loop_config(block_dim=512)
+
+    for i, j in ti.ndrange(types, amount):
+        if i == 1 and j > foodAmount-1 or alive[i, j] == False:
+            continue
+        force_acc = ti.Vector([0.0, 0.0])
+        pos1 = positions[i, j]
+
+        for iOther, jOther in ti.ndrange(types, amount):
+            if i == 0 and iOther == 1 and tickCount < 200:
+                continue
+            if iOther == 1 and jOther > foodAmount-1 or alive[i, j] == False:
+                continue
+            if i != iOther or j != jOther:
+                dir = positions[iOther, jOther] - pos1  # Vector from current to other particle 
+                dist_sqr = dir.norm_sqr() + 1e-10       # 
+                dist = ti.sqrt(dist_sqr)                # Distance between particles
+                r = dist                                # Distance to be used for function
+                
+                if i == 0 and iOther == 1 and r <= sigma*1.5:
+                    alive[iOther, jOther] = False
+                    positions[iOther, jOther] = [-1, -1]
+                    continue
 
 
-                m = 6.0
-                n = 4.0
+                m = 12.0
+                n = 6.0
                 temp = sigma / r
                 repulsive_force = temp ** m
                 attraction_force = temp ** n
@@ -156,31 +171,11 @@ def update_vel():
                     att_force = force / dist_sqr
 
                     force_acc += dir * (att_force / dist)
-                
-                # if force_Mult < 0 and dist <= sigma:
-                #     newEpsilon = epsilon * force_Mult
-                # else:
-                #     newEpsilon = epsilon * force_Mult
-
-                # result_force = 24 * newEpsilon * (2 * repulsive_force - attraction_force) / dist
-
-                # print("hhh")
-                # if force_Mult < 0:
-                #     print("ggg")
-                #     endForce = -abs(result_force) * dir.normalized()
-                    
-                # if (endForce > 0):
-                #     endForce *= 10
-
-                # force = forces[i, iOther]
-                # att_force = force / dist_sqr
-                # repul_force = force
-
-                # force_acc += dir * (att_force / dist)
                     
         # print(velocities[i, j])
         velocities[i, j] += force_acc / width
         # print(force_acc / width)
+        # velocities[i, j] += ti.Vector([0.0, gravity])
         speed = velocities[i, j].norm()
         if speed > max_speed:
             velocities[i, j] = velocities[i, j].normalized() * max_speed
@@ -280,27 +275,49 @@ def render3():
         # gui.circles(np_pos[i * amount: (i + 1) * amount], radius=rad, color=colors[i])
     gui.show()
 
+@ti.kernel
+def checkTouchGround() -> bool:
+    hasTouched = False
+    for j in range(amount):
+        if positions[0, j].y <= boxHeight + 0.01:
+            hasTouched = True
+    return hasTouched
+
 def run():
     init()
     # initFood()
     # printPos()
     print("1", velocities[0, 0])
-    timer = 0
-    second = 0
+    hasTouchedGround = False
+    tickCount = 0
     # gui.show()
     while gui.running:
     # while window.running:
         # gui.set_image()
-        update_vel()
+        # update_vel()
+        if not hasTouchedGround:
+            hasTouchedGround = checkTouchGround()
+        else:
+            tickCount += 1
+        update_vel2(tickCount)
+        # update_vel(tickCount)
         # print("2", velocities[0, 0])
         # check_coll()
         move()
         # render()
-        if second % 1 == 0:
-            render3()
-        second += 1   
+        render3()
         # gui.show()
         # window.show()
+
+
+
+
+# ================================================================
+#         Code for RL training
+# ================================================================
+
+
+
 
 @ti.kernel
 def cntEaten() -> int:
@@ -343,7 +360,7 @@ def particleCloseReward(maxPoints: int) -> int:
 
 def objective(trial):
     # Example: optimize forces[0,0]
-    force_00 = trial.suggest_float('force_00', -1.0, 1.0)
+    force_00 = trial.suggest_float('force_00', 0, 1.0)
     force_01 = trial.suggest_float('force_01', -1.0, 1.0)
     
     # Reset the simulation to the initial state
@@ -354,11 +371,17 @@ def objective(trial):
     forces[0, 1] = force_01
 
     total_reward = 0.0
-
+    tickCount = 0
+    hasTouchedGround = False
     second = 0
     # Run the simulation for N steps
     for step in range(5000):
-        update_vel()
+        if not hasTouchedGround:
+            hasTouchedGround = checkTouchGround()
+        else:
+            tickCount += 1
+        
+        update_vel2(tickCount)
         move()
         # check_coll()  # Optional
         # if second % 1 == 0:
@@ -377,8 +400,13 @@ def objective(trial):
     return total_reward
 
 def train():
-    study = optuna.create_study(direction='maximize')
-    study.optimize(objective, n_trials=50)
+    study = optuna.create_study(
+        direction='maximize', 
+        storage="sqlite:///db.sqlite3", 
+        study_name="Forces", 
+        load_if_exists=True
+        )
+    study.optimize(objective, n_trials=5)
 
     print("Best trial:")
     trial = study.best_trial
@@ -387,9 +415,6 @@ def train():
     print("  Params: ")
     for key, value in trial.params.items():
         print(f"    {key}: {value}")
-    
-    vis.plot_optimization_history(study).show()
-    vis.plot_param_importances(study).show()
 
 # train()
 run()
