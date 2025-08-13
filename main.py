@@ -8,16 +8,14 @@ import optuna.visualization as vis
 
 
 ti.init(arch=ti.cuda, random_seed=int(time.time()))
-# window = ti.ui.Window(name='window', res = (1000, 1000), fps_limit=200, pos = (150, 150))
 
 width = 1800
 height = 600
-ratio = width/height
-rad = 3
-sigma = 40 * rad / width
-epsilon = 0.1
+
 boxHeight = 0.4
 boxWidth = 0.4
+
+rad = 3
 types = 2
 
 #   Parameters for general physics
@@ -63,7 +61,7 @@ def initBox():
     forces[0, 0] = 0.5
 
 @ti.kernel
-def update_vel2(tickCount: int, max_speed: float, coll_force: int, gravity: float):
+def update_vel(tickCount: int, max_speed: float, coll_force: int, gravity: float):
     # print(tickCount < 200)
     for i, j in ti.ndrange(types, amount):
         if i == 1 and j > foodAmount-1 or alive[i, j] == False:
@@ -82,7 +80,7 @@ def update_vel2(tickCount: int, max_speed: float, coll_force: int, gravity: floa
                 dist = ti.sqrt(dist_sqr)                # Distance between particles
                 r = dist                                # Distance to be used for function
                 
-                if i == 0 and iOther == 1 and r <= sigma:
+                if i == 0 and iOther == 1 and r <= (40 * rad / width):
                     alive[iOther, jOther] = False
                     positions[iOther, jOther] = [-1, 1]
                     continue
@@ -125,98 +123,7 @@ def update_vel2(tickCount: int, max_speed: float, coll_force: int, gravity: floa
         velocities[i, j] += ti.Vector([0.0, -gravity*0.015])
         if i == 1:
             velocities[i, j] += ti.Vector([gravity*0.015, 0.0])
-        
-@ti.kernel
-def update_vel(tickCount: int):
-    ti.loop_config(block_dim=512)
-
-    for i, j in ti.ndrange(types, amount):
-        if i == 1 and j > foodAmount-1 or alive[i, j] == False:
-            continue
-        force_acc = ti.Vector([0.0, 0.0])
-        pos1 = positions[i, j]
-
-        for iOther, jOther in ti.ndrange(types, amount):
-            if i == 0 and iOther == 1 and tickCount < 200:
-                continue
-            if iOther == 1 and jOther > foodAmount-1 or alive[i, j] == False:
-                continue
-            if i != iOther or j != jOther:
-                dir = positions[iOther, jOther] - pos1  # Vector from current to other particle 
-                dist_sqr = dir.norm_sqr() + 1e-10       # 
-                dist = ti.sqrt(dist_sqr)                # Distance between particles
-                r = dist                                # Distance to be used for function
-                
-                if i == 0 and iOther == 1 and r <= sigma*1.5:
-                    alive[iOther, jOther] = False
-                    positions[iOther, jOther] = [-1, -1]
-                    continue
-
-
-                m = 12.0
-                n = 6.0
-                temp = sigma / r
-                repulsive_force = temp ** m
-                attraction_force = temp ** n
-                
-                force_Mult = forces[i, iOther]
-                newEpsilon = epsilon * force_Mult
-                
-                result_force = newEpsilon * ((m * repulsive_force - n * attraction_force) / r)
-                endForce = result_force * dir.normalized()
-
-                # force_acc += endForce
-                if (result_force < 0):
-                    # if result_force < 0.0000001: 
-                        # print(dist)
-                    force_acc += endForce
-                else:
-                    # print(dist)
-                    force = -forces[i, iOther]
-                    att_force = force / dist_sqr
-
-                    force_acc += dir * (att_force / dist)
-                    
-        # print(velocities[i, j])
-        velocities[i, j] += force_acc / width
-        # print(force_acc / width)
-        # velocities[i, j] += ti.Vector([0.0, gravity])
-        speed = velocities[i, j].norm()
-        if speed > max_speed:
-            velocities[i, j] = velocities[i, j].normalized() * max_speed
-            # print(velocities[i, j].normalized() * max_speed)
-        else:
-            velocities[i, j] = velocities[i, j].normalized() * speed*0.98
-        # force_acc += ti.Vector([0.0, -1000])
-        velocities[i, j] += ti.Vector([0.0, -gravity])
-        
-
-@ti.kernel
-def check_coll():
-    ti.loop_config(block_dim=512)
-    for i, j in ti.ndrange(types, amount):
-        force_acc = ti.Vector([0.0, 0.0])
-        pos1 = positions[i, j]
-        for iOther, jOther in ti.ndrange(types, amount):  
-            if i != iOther or j != jOther:
-                dir = positions[iOther, jOther] - pos1
-                dist_sqr = dir.norm_sqr() + 1e-5
-                dist = ti.sqrt(dist_sqr)
-                
-                if dist < (4.0 * rad / width):
-                    n = dir.normalized()
-                    oldVel = velocities[i, j]
-                    velocities[i, j] = oldVel - 1.65 * oldVel.dot(n) * n
-                    
-                    dir2 = -dir
-                    n2 = dir2.normalized()
-                    oldVel2 = velocities[iOther, jOther]
-                    velocities[iOther, jOther] = oldVel2 - 1.65 * oldVel2.dot(n2) * n2
-                    
-                    overlap = (4.0 * rad / width) - dist
-                    push = 0.5 * overlap * n
-                    positions[i, j] -= push
-                    positions[iOther, jOther] += push        
+   
 
 @ti.kernel
 def move_valley():
@@ -275,24 +182,10 @@ def move_box():
                     -1*vel.y
                 ])
 
-def drawRectangle(p0, p1, p2, p3, color):
-    
-    # Draw rectangle as two triangles
-    gui.triangle(p0, p1, p2, color)
-    gui.triangle(p0, p2, p3, color)
-
 
 def render(hasValley):
     # gui.clear(0xFFFFFF)
     np_pos = positions.to_numpy().reshape(-1, 2)
-    
-    # Squarepoints
-    p0 = [0.0, 0.0]
-    p1 = [0.4, 0.0]
-    p2 = [0.4, 0.4]
-    p3 = [0.0, 0.4]
-    # drawRectangle(p0, p1, p2, p3, 0xAAAAAA)
-    # gui.rect([0.5, 0.5], [0.6, 0.4], 0xAAAAAA)
     
     if hasValley:
         gui.rect([0, 0], [boxWidth, boxHeight], 1, color=0xAAAAAA)
@@ -329,7 +222,7 @@ def run_valley():
             hasTouchedGround = checkTouchGround()
         else:
             tickCount += 1
-        update_vel2(tickCount, max_speed, coll_force, gravity)
+        update_vel(tickCount, max_speed, coll_force, gravity)
         # update_vel(tickCount)
         # print("2", velocities[0, 0])
         # check_coll()
@@ -346,7 +239,7 @@ def run_box():
     max_speed = glob_max_speed
     coll_force = glob_coll_force
     while gui.running:
-        update_vel2(0, max_speed, coll_force, gravity)
+        update_vel(0, max_speed, coll_force, gravity)
         move_box()
         render(hasValley=False)
 
@@ -413,25 +306,6 @@ def clustering_level_max(range: float) -> float:
     print("Average particles in range", range, ":", in_range_sum / amount)
     return in_range_sum / amount
 
-@ti.kernel
-def clustering_level_target(range: float, target: float) -> float:
-    in_range_sum = 0
-    for j in ti.ndrange(amount):
-        pos1 = positions[0, j]
-        cnt = 0
-        for jj in ti.ndrange(amount):
-            if j == jj:
-                continue
-            pos2 = positions[0, jj]
-            dir =  pos2 - pos1  # Vector from current to other particle 
-            dist_sqr = dir.norm_sqr() + 1e-10       
-            dist = ti.sqrt(dist_sqr)
-            
-            if dist < range:
-                cnt += 1
-        in_range_sum += cnt        
-    print("Average particles in range", range, ":", in_range_sum / amount)
-    return (in_range_sum / amount)
 
 
 
@@ -468,7 +342,7 @@ def objective_forces_valley(trial):
         else:
             tickCount += 1
         
-        update_vel2(tickCount, max_speed, coll_force, gravity)
+        update_vel(tickCount, max_speed, coll_force, gravity)
         move_valley()
         cnt += 1
         if cnt % 3 == 0:
@@ -497,7 +371,7 @@ def objective_clusterization_box(trial):
     cnt = 0
     # Run the simulation for N steps / ticks
     for step in range(2000):
-        update_vel2(0, max_speed, coll_force, gravity)
+        update_vel(0, max_speed, coll_force, gravity)
         move_box()
         cnt += 1
         if cnt % 2 == 0:
@@ -548,6 +422,6 @@ def train_clusterization_box():
     optuna.visualization.plot_slice(study, params=['gravity', 'coll_force', 'max_speed']).show()
         
 # train_forces_valley()
-train_clusterization_box()
-# run_valley()
+# train_clusterization_box()
+run_valley()
 # run_box()
