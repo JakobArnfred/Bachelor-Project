@@ -1,4 +1,4 @@
-# Bachelor-Project
+# Bachelor-Project - Particle Life Simulation
 
 # Installing prerequisites:
 ### 1. 
