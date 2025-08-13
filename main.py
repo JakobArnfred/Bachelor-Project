@@ -4,6 +4,13 @@ import time
 import random
 import optuna
 import optuna.visualization as vis
+import sys
+
+# read command line arguments (Used to run specific funtion at file end)
+map = sys.argv[1]
+training = int(sys.argv[2])
+trials = int(sys.argv[3])
+drawing = int(sys.argv[3])
 
 # Initializes Taichi - Use GPU
 ti.init(arch=ti.gpu)
@@ -44,7 +51,6 @@ forces = ti.field(float, shape=(types, types))
 
 # Taichi GUI setup
 gui = ti.GUI("Particle Life", res=(width, height), background_color=0x000000)
-
 
 
 # Initializes environment for valley map
@@ -458,7 +464,7 @@ def objective_forces_valley(trial):
         move_valley()
         
         cnt += 1
-        if cnt % 3 == 0:
+        if cnt % 4 == 0 and drawing == 1:
             render(True)
 
     # Add reward for amount of food particles eaten
@@ -494,7 +500,7 @@ def objective_clusterization_box(trial):
         move_box()
         
         cnt += 1
-        if cnt % 2 == 0:
+        if cnt % 3 == 0 and drawing == 1:
             render(False)
 
     # Add reward for average number of particles within '5 * radius'
@@ -505,7 +511,7 @@ def objective_clusterization_box(trial):
 
 
 # Training function for valley map
-def train_forces_valley():
+def train_forces_valley(trials):
     # Create study
     study = optuna.create_study(
         direction='maximize', 
@@ -515,7 +521,7 @@ def train_forces_valley():
         )
     
     # Optimize study with objective function
-    study.optimize(objective_forces_valley, n_trials=20)
+    study.optimize(objective_forces_valley, n_trials=trials)
 
     # Print best result and parameter values:
     print("Best trial:")
@@ -531,7 +537,7 @@ def train_forces_valley():
   
   
 # Training function for box map    
-def train_clusterization_box():
+def train_clusterization_box(trials):
     # Create study
     study = optuna.create_study(
         direction='maximize', 
@@ -541,7 +547,7 @@ def train_clusterization_box():
         )
     
     # Optimize study with objective function
-    study.optimize(objective_clusterization_box, n_trials=20)
+    study.optimize(objective_clusterization_box, n_trials=trials)
 
     # Print best result and parameter values:
     print("Best trial:")
@@ -558,4 +564,28 @@ def train_clusterization_box():
 # train_forces_valley()
 # train_clusterization_box()
 # run_valley()
-run_box()
+# run_box()
+
+if __name__ == "__main__":
+    # Check if argument 2, 3 and 4 is allowed
+    if training != 0 and training != 1:
+        print("Second argument must be 1 or 0")
+    if trials < 1:
+        print("Third argument must be at least 1")
+    if drawing != 0 and drawing != 1:
+        print("Fourth argument must be 1 or 0")
+    
+    # Run function based on arguments
+    if map == "valley":
+        if training == 1:
+            train_forces_valley(trials)
+        else:
+            run_valley() 
+            
+    elif map == "box":
+        if training == 1:
+            train_clusterization_box(trials)
+        else:
+            run_box()
+    else:
+        print("First argument must be 'valley' or 'box'")
