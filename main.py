@@ -23,11 +23,12 @@ types = 2
 #   Parameters for general physics
 amount = 500
 foodAmount = 30
-gravity = 0.1
-max_speed = 0.0035
 coll_range = 30          # Range for guranteed repulsion force in the unit for 'rad'
-coll_force = 300
 force_mult = 60         # Multiplier for stength of particle interaction forces
+
+glob_gravity = 0.1
+glob_max_speed = 0.0035
+glob_coll_force = 300
 
 positions = ti.Vector.field(2, dtype=float, shape=(types, amount))
 velocities = ti.Vector.field(2, dtype=float, shape=(types, amount))
@@ -37,7 +38,7 @@ colors = [0xff5050, 0x80ff80, 0x0000ff, 0xff8800]
 gui = ti.GUI("Particle Life", res=(width, height), background_color=0x000000)
 
 
-def init():
+def initValley():
     for j in range(amount):
         positions[0, j] = [random.random()*boxWidth, (random.random()*0.5) + boxHeight + 0.05]
         # velocities[i, j] = [ti.randn()/width, ti.randn()/height]
@@ -49,21 +50,26 @@ def init():
         positions[1, k] = [random.random()*boxWidth + (1-boxWidth), random.random()*0.5 + boxHeight+0.05]
         velocities[1, k] = [0.0, 0.0]
         alive[1, k] = True
-    forces[0, 0] = 0.1
+    forces[0, 0] = 0.15
     forces[0, 1] = 0.9
     forces[1, 0] = -0.02
     forces[1, 1] = 1
 
+def initBox():
+    for j in range(amount):
+        positions[0, j] = [random.random(), (random.random())]
+        velocities[0, j] = [0.0, 0.0]
+        alive[0, j] = True
+    forces[0, 0] = 0.5
+
 @ti.kernel
-def update_vel2(tickCount: int):
+def update_vel2(tickCount: int, max_speed: float, coll_force: int, gravity: float):
     # print(tickCount < 200)
     for i, j in ti.ndrange(types, amount):
         if i == 1 and j > foodAmount-1 or alive[i, j] == False:
             continue
         force_acc = ti.Vector([0.0, 0.0])
         pos1 = positions[i, j]
-        
-        acc = 0
 
         for iOther, jOther in ti.ndrange(types, amount):
             if i == 0 and iOther == 1 and tickCount < 200:
@@ -102,7 +108,6 @@ def update_vel2(tickCount: int):
                 #     att_force = force / dist_sqr
 
                 #     force_acc += dir * (att_force / dist)
-                acc += 1
                     
                     
         # force_acc += ti.Vector([0.0, -gravity]) * amount  
@@ -214,13 +219,18 @@ def check_coll():
                     positions[iOther, jOther] += push        
 
 @ti.kernel
-def move():
+def move_valley():
     for i, j in ti.ndrange(types, amount):
         if i == 1 and j > foodAmount-1 or alive[i, j] == False:
                 continue
         oldPos = positions[i, j]
         newPos = positions[i, j] + velocities[i, j]
         vel = velocities[i, j]
+        
+        if newPos.y < 0.01:
+            alive[i, j] = False
+            positions[i, j] = [-1, 1]
+            continue
 
         if oldPos.x >= boxWidth and oldPos.x <= 1-boxWidth and oldPos.y < boxHeight:
             positions[i, j] = ti.Vector([
@@ -246,6 +256,24 @@ def move():
         # positions[i, j] += velocities[i, j]
         # positions[i, j].x = max(0.0, min(positions[i, j].x, 1.0))
         # positions[i, j].y = max(0.0, min(positions[i, j].y, 1.0))
+        
+@ti.kernel
+def move_box():
+    for j in ti.ndrange(amount):
+        oldPos = positions[0, j]
+        newPos = positions[0, j] + velocities[0, j]
+        vel = velocities[0, j]
+        
+        positions[0, j] = ti.Vector([
+                max(0.0, min(newPos.x, 1.0)), 
+                max(0.0, min(newPos.y, 1.0))
+        ])
+        
+        if vel.y < 0 and oldPos.y > 0 and positions[0, j].y == 0.0:
+            velocities[0, j] = ti.Vector([
+                    vel.x,
+                    -1*vel.y
+                ])
 
 def drawRectangle(p0, p1, p2, p3, color):
     
@@ -254,7 +282,7 @@ def drawRectangle(p0, p1, p2, p3, color):
     gui.triangle(p0, p2, p3, color)
 
 
-def render3():
+def render(hasValley):
     # gui.clear(0xFFFFFF)
     np_pos = positions.to_numpy().reshape(-1, 2)
     
@@ -266,13 +294,12 @@ def render3():
     # drawRectangle(p0, p1, p2, p3, 0xAAAAAA)
     # gui.rect([0.5, 0.5], [0.6, 0.4], 0xAAAAAA)
     
-
-    gui.rect([0, 0], [boxWidth, boxHeight], 1, color=0xAAAAAA)
-    gui.rect([1-boxWidth, 0], [1, boxHeight], 1, color=0xAAAAAA)
+    if hasValley:
+        gui.rect([0, 0], [boxWidth, boxHeight], 1, color=0xAAAAAA)
+        gui.rect([1-boxWidth, 0], [1, boxHeight], 1, color=0xAAAAAA)
 
     for i in range(types):
         gui.circles(np_pos[i * amount: (i + 1) * amount], radius=rad, color=colors[i])
-        # gui.circles(np_pos[i * amount: (i + 1) * amount], radius=rad, color=colors[i])
     gui.show()
 
 @ti.kernel
@@ -283,11 +310,14 @@ def checkTouchGround() -> bool:
             hasTouched = True
     return hasTouched
 
-def run():
-    init()
+def run_valley():
+    initValley()
+    
+    gravity = glob_gravity
+    max_speed = glob_max_speed
+    coll_force = glob_coll_force
     # initFood()
     # printPos()
-    print("1", velocities[0, 0])
     hasTouchedGround = False
     tickCount = 0
     # gui.show()
@@ -299,17 +329,26 @@ def run():
             hasTouchedGround = checkTouchGround()
         else:
             tickCount += 1
-        update_vel2(tickCount)
+        update_vel2(tickCount, max_speed, coll_force, gravity)
         # update_vel(tickCount)
         # print("2", velocities[0, 0])
         # check_coll()
-        move()
+        move_valley()
         # render()
-        render3()
+        render(hasValley=True)
+        # cntEaten()
         # gui.show()
         # window.show()
 
-
+def run_box():
+    initBox()
+    gravity = glob_gravity
+    max_speed = glob_max_speed
+    coll_force = glob_coll_force
+    while gui.running:
+        update_vel2(0, max_speed, coll_force, gravity)
+        move_box()
+        render(hasValley=False)
 
 
 # ================================================================
@@ -325,16 +364,18 @@ def cntEaten() -> int:
     for j in ti.ndrange(foodAmount):
         if not alive[1, j]:
             cnt += 1
-    print(cnt)
+    print("Eaten", cnt)
     return cnt
 
 @ti.kernel
 def particleCloseReward(maxPoints: int) -> int: 
-    maxDist = ti.sqrt(boxHeight + boxWidth)
-    reward = 0
+    maxDist = ti.sqrt(2)        # Diagonal distance of GUI (Taichi GUI positions are defined from 0.0-1.0 in each dimension)
+    reward = 0.0
     for j in ti.ndrange(amount):
+        if not alive[0, j]:
+            continue
         particlePos = positions[0, j]
-        distSum = 0
+        distSum = 0.0
         aliveCnt = 0
         for jj in ti.ndrange(foodAmount):
             # print("123", alive[1, jj])
@@ -343,7 +384,7 @@ def particleCloseReward(maxPoints: int) -> int:
                 dir = foodPos - particlePos  # Vector from current to other particle 
                 dist_sqr = dir.norm_sqr() + 1e-10       
                 dist = ti.sqrt(dist_sqr)
-
+                
                 distSum += dist
                 aliveCnt += 1
         avgDist = distSum / aliveCnt
@@ -352,61 +393,130 @@ def particleCloseReward(maxPoints: int) -> int:
     print("ParticleCloseReward = ", reward)
     return reward
 
+@ti.kernel
+def clustering_level_max(range: float) -> float:
+    in_range_sum = 0
+    for j in ti.ndrange(amount):
+        pos1 = positions[0, j]
+        cnt = 0
+        for jj in ti.ndrange(amount):
+            if j == jj:
+                continue
+            pos2 = positions[0, jj]
+            dir =  pos2 - pos1  # Vector from current to other particle 
+            dist_sqr = dir.norm_sqr() + 1e-10       
+            dist = ti.sqrt(dist_sqr)
+            
+            if dist < range:
+                cnt += 1
+        in_range_sum += cnt        
+    print("Average particles in range", range, ":", in_range_sum / amount)
+    return in_range_sum / amount
+
+@ti.kernel
+def clustering_level_target(range: float, target: float) -> float:
+    in_range_sum = 0
+    for j in ti.ndrange(amount):
+        pos1 = positions[0, j]
+        cnt = 0
+        for jj in ti.ndrange(amount):
+            if j == jj:
+                continue
+            pos2 = positions[0, jj]
+            dir =  pos2 - pos1  # Vector from current to other particle 
+            dist_sqr = dir.norm_sqr() + 1e-10       
+            dist = ti.sqrt(dist_sqr)
+            
+            if dist < range:
+                cnt += 1
+        in_range_sum += cnt        
+    print("Average particles in range", range, ":", in_range_sum / amount)
+    return (in_range_sum / amount)
+
 
 
             
 
 
 
-def objective(trial):
+def objective_forces_valley(trial):
     # Example: optimize forces[0,0]
-    force_00 = trial.suggest_float('force_00', 0, 1.0)
+    force_00 = trial.suggest_float('force_00', 0.1, 1.0)
     force_01 = trial.suggest_float('force_01', -1.0, 1.0)
     
     # Reset the simulation to the initial state
-    init()
+    initValley()
 
-    # Apply to your force field
+    # Apply to force field
     forces[0, 0] = force_00
     forces[0, 1] = force_01
 
+    gravity = glob_gravity
+    max_speed = glob_max_speed
+    coll_force = glob_coll_force
+    
+    # print(max_speed, coll_force, gravity)
+    
     total_reward = 0.0
     tickCount = 0
     hasTouchedGround = False
-    second = 0
-    # Run the simulation for N steps
-    for step in range(5000):
+    cnt = 0
+    # Run the simulation for N steps / ticks
+    for step in range(4000):
         if not hasTouchedGround:
             hasTouchedGround = checkTouchGround()
         else:
             tickCount += 1
         
-        update_vel2(tickCount)
-        move()
-        # check_coll()  # Optional
-        # if second % 1 == 0:
-            # render3()
-        # second += 1 
-        
-        # Evaluate reward at each step
-        # Example: reward could be distance minimization between type 0 and type 1
-        # reward = compute_reward()
-        # total_reward += reward
+        update_vel2(tickCount, max_speed, coll_force, gravity)
+        move_valley()
+        cnt += 1
+        if cnt % 3 == 0:
+            render(True)
 
+    # Add reward for amount of food particles eaten
     total_reward += cntEaten() * 100
+    
+    # Add reward for proximity to food for alive none-food-particles
     total_reward += particleCloseReward(1)
 
-    # Return cumulative reward (maximize this)
+    # Return total reward
     return total_reward
 
-def train():
+
+def objective_clusterization_box(trial):
+    # Example: optimize forces[0,0]
+    gravity = trial.suggest_float('gravity', 0.0, 0.2)
+    coll_force = trial.suggest_int('coll_force', 0, 1000)
+    max_speed = trial.suggest_float('max_speed', 0.0001, 0.08)
+    
+    # Reset the simulation to the initial state
+    initBox()
+    
+    total_reward = 0.0
+    cnt = 0
+    # Run the simulation for N steps / ticks
+    for step in range(2000):
+        update_vel2(0, max_speed, coll_force, gravity)
+        move_box()
+        cnt += 1
+        if cnt % 2 == 0:
+            render(False)
+
+    # print(positions)
+    total_reward += clustering_level_max((5 * rad) / width)
+
+    # Return total reward
+    return total_reward
+
+def train_forces_valley():
     study = optuna.create_study(
         direction='maximize', 
         storage="sqlite:///db.sqlite3", 
         study_name="Forces", 
         load_if_exists=True
         )
-    study.optimize(objective, n_trials=5)
+    study.optimize(objective_forces_valley, n_trials=20)
 
     print("Best trial:")
     trial = study.best_trial
@@ -415,6 +525,29 @@ def train():
     print("  Params: ")
     for key, value in trial.params.items():
         print(f"    {key}: {value}")
+    
+    optuna.visualization.plot_slice(study, params=['force_00', 'force_01']).show()
+        
+def train_clusterization_box():
+    study = optuna.create_study(
+        direction='maximize', 
+        storage="sqlite:///db.sqlite3", 
+        study_name="Clusterization", 
+        load_if_exists=True
+        )
+    study.optimize(objective_clusterization_box, n_trials=20)
 
-# train()
-run()
+    print("Best trial:")
+    trial = study.best_trial
+
+    print(f"  Value: {trial.value}")
+    print("  Params: ")
+    for key, value in trial.params.items():
+        print(f"    {key}: {value}")
+    
+    optuna.visualization.plot_slice(study, params=['gravity', 'coll_force', 'max_speed']).show()
+        
+# train_forces_valley()
+train_clusterization_box()
+# run_valley()
+# run_box()
