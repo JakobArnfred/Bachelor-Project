@@ -534,6 +534,7 @@ def train_forces_valley(trials):
     
     # Draw visualizations
     optuna.visualization.plot_slice(study, params=['force_00', 'force_01']).show()
+    optuna.visualization.plot_param_importances(study, params=['force_00', 'force_01']).show()
   
   
 # Training function for box map    
@@ -559,6 +560,7 @@ def train_clusterization_box(trials):
     
     # Draw visualizations
     optuna.visualization.plot_slice(study, params=['gravity', 'coll_force', 'max_speed']).show()
+    optuna.visualization.plot_param_importances(study, params=['gravity', 'coll_force', 'max_speed']).show()
      
         
 # train_forces_valley()
