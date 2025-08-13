@@ -23,10 +23,6 @@ height = 600
 boxHeight = 0.4
 boxWidth = 0.4
 
-# Particle radius and number of particle types
-rad = 3
-types = 2
-
 # Colors for particle types
 colors = [0xff5050, 0x80ff80, 0x8080ff, 0xffAA00]
 
@@ -40,6 +36,10 @@ force_mult = 60                     # Multiplier for stength of particle interac
 glob_gravity = 0.1              
 glob_max_speed = 0.0035             # Maximum speed pr. tick
 glob_coll_force = 300               # Repulsion force when in range of coll_range
+
+# Particle radius and number of particle types
+rad = 3
+types = 2
 
 # Fields to hold data on all particles
 positions = ti.Vector.field(2, dtype=float, shape=(types, amount))
