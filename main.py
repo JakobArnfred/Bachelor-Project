@@ -29,12 +29,12 @@ colors = [0xff5050, 0x80ff80, 0x8080ff, 0xffAA00]
 # Parameters for general physics
 foodAmount = 30                     # Number of food particles when in valley
 coll_range = 30                     # Range for guranteed repulsion force in the unit for 'rad'
-force_mult = 60                     # Multiplier for stength of particle interaction forces
+force_mult = 20                     # Multiplier for stength of particle interaction forces
 
 # Standards for physics (Can be overwritten for training phase)
 glob_amount = 500                   # Number of main particles
-glob_gravity = 0.1              
-glob_max_speed = 0.0035             # Maximum speed pr. tick
+glob_gravity = 0.12              
+glob_max_speed = 0.0025             # Maximum speed pr. tick
 glob_coll_force = 300               # Repulsion force when in range of coll_range
 
 # Particle radius and number of particle types
@@ -70,7 +70,7 @@ def initValley(amount):
     # Set forces for particle interaction (Positive = attraction)
     forces[0, 0] = 0.15
     forces[0, 1] = 0.9
-    forces[1, 0] = -0.02
+    forces[1, 0] = 0
     forces[1, 1] = 1
 
 
@@ -88,8 +88,13 @@ def initBox(amount):
 
 # Function for updating all particle velocities
 @ti.kernel
-def update_vel(tickCount: int, max_speed: float, coll_force: int, gravity: float, amount: int):
+def update_vel(tickCount: int, max_speed: float, coll_force: int, gravity: float, particle_amount: int):
     
+    # Use highest highest amount value
+    amount = particle_amount
+    if particle_amount < foodAmount:
+        amount = foodAmount
+        
     # Loop though all particles
     for i, j in ti.ndrange(types, amount):
         
@@ -104,7 +109,7 @@ def update_vel(tickCount: int, max_speed: float, coll_force: int, gravity: float
         for iOther, jOther in ti.ndrange(types, amount):
             
             # Particles does not interact with food before cooldown
-            if i == 0 and iOther == 1 and tickCount < 200:
+            if i == 0 and iOther == 1 and tickCount < 300:
                 continue
             
             # Skip dead particles
@@ -159,8 +164,12 @@ def update_vel(tickCount: int, max_speed: float, coll_force: int, gravity: float
 
 # Function to move particles on valley map
 @ti.kernel
-def move_valley(amount: int):
-    
+def move_valley(particle_amount: int):
+    # Use highest highest amount value
+    amount = particle_amount
+    if particle_amount < foodAmount:
+        amount = foodAmount
+        
     # Loop through all particles
     for i, j in ti.ndrange(types, amount):
         
@@ -236,8 +245,8 @@ def move_box(amount: int):
 
 
 # Function for rendering / drawing
-def render(hasValley, amount):
-    
+def render(hasValley):
+        
     # Numpy with all particles
     np_pos = positions.to_numpy().reshape(-1, 2)
     
@@ -248,7 +257,7 @@ def render(hasValley, amount):
 
     # Draw all particles
     for i in range(types):
-        gui.circles(np_pos[i * amount: (i + 1) * amount], radius=rad, color=colors[i])
+        gui.circles(np_pos[i * glob_amount: (i + 1) * glob_amount], radius=rad, color=colors[i])
     
     # Show the GUI
     gui.show()
@@ -270,7 +279,7 @@ def checkTouchGround(amount: int) -> bool:
 def run_valley():
     
     # Get physics variables
-    amount = glob_amount
+    amount = 100
     gravity = glob_gravity
     max_speed = glob_max_speed
     coll_force = glob_coll_force
@@ -298,7 +307,7 @@ def run_valley():
         move_valley(amount)
         
         # Draw all particles and map
-        render(hasValley=True, amount=amount)
+        render(hasValley=True)
 
 # Run function for box map
 def run_box():
@@ -322,11 +331,11 @@ def run_box():
         move_box(amount)
         
         # Draw all particles and map
-        render(hasValley=False, amount=amount)
+        render(hasValley=False)
 
 
 # ================================================================
-#         Code for RL training
+#         Code for Optuna Optimization - Reward functions
 # ================================================================
 
 
@@ -422,7 +431,9 @@ def clustering_level_max(range: float, amount: int) -> float:
 
 
 
-
+# ================================================================
+#         Code for Optuna Optimization - Studies and objective functions
+# ================================================================
             
 
 
@@ -431,7 +442,7 @@ def objective_forces_valley(trial):
     # Optuna suggests force values for main particle
     force_00 = trial.suggest_float('force_00', 0.1, 1.0)
     force_01 = trial.suggest_float('force_01', -1.0, 1.0)
-    amount = trial.suggest_int('Particles', 0, 500)
+    amount = trial.suggest_int('Particles', 0, 200)
     
     # Reset the simulation to the initial state
     initValley(amount)
@@ -468,7 +479,7 @@ def objective_forces_valley(trial):
         
         cnt += 1
         if cnt % 4 == 0 and drawing == 1:
-            render(True, amount)
+            render(True)
 
     # Add reward for amount of food particles eaten
     total_reward += cntEaten() * 100
@@ -480,6 +491,62 @@ def objective_forces_valley(trial):
     return total_reward
 
 
+
+
+
+# Objective function for training on valley map without gravity
+def objective_forces_valley_zeroG(trial):
+    # Optuna suggests force values for main particle
+    force_00 = trial.suggest_float('force_00', 0.1, 1.0)
+    force_01 = trial.suggest_float('force_01', -1.0, 1.0)
+    amount = trial.suggest_int('Particles', 0, 200)
+    
+    # Reset the simulation to the initial state
+    initValley(amount)
+
+    # Apply suggestions to force field
+    forces[0, 0] = force_00
+    forces[0, 1] = force_01
+
+    # Get physics variables
+    gravity = 0
+    max_speed = glob_max_speed
+    coll_force = glob_coll_force
+    
+    # Values for loop (Ticker starts after a particle touches ground)
+    total_reward = 0.0
+    tickCount = 0
+    cnt = 0
+    
+    # Run the simulation for N steps / ticks
+    for step in range(4000):
+        # counter (Not necessary to check for ground contact)
+        tickCount += 1
+        
+        # Update velocities
+        update_vel(tickCount, max_speed, coll_force, gravity, amount)
+        
+        # Move all particles
+        move_valley(amount)
+        
+        cnt += 1
+        if cnt % 4 == 0 and drawing == 1:
+            render(True)
+
+    # Add reward for amount of food particles eaten
+    total_reward += cntEaten() * 100
+    
+    # Add reward for proximity to food for alive none-food-particles
+    total_reward += particleCloseReward(1, amount)
+
+    # Return total reward
+    return total_reward
+
+
+
+
+
+
 # Objective function for training on box map
 def objective_clusterization_box(trial):
     # Optuna suggests physics variable values
@@ -487,8 +554,8 @@ def objective_clusterization_box(trial):
     coll_force = trial.suggest_int('coll_force', 0, 1000)
     max_speed = trial.suggest_float('max_speed', 0.0001, 0.08)
     
-    # Get physics variable
-    amount = glob_amount
+    # Ammount of particles
+    amount = 500
     
     # Reset the simulation to the initial state
     initBox(amount)
@@ -507,7 +574,7 @@ def objective_clusterization_box(trial):
         
         cnt += 1
         if cnt % 3 == 0 and drawing == 1:
-            render(False, amount)
+            render(False)
 
     # Add reward for average number of particles within '5 * radius'
     total_reward += clustering_level_max((5 * rad) / width, amount)
@@ -522,11 +589,11 @@ def train_forces_valley(trials):
     study = optuna.create_study(
         direction='maximize', 
         storage="sqlite:///db.sqlite3", 
-        study_name="Forces", 
+        study_name="Valley", 
         load_if_exists=True
         )
     
-    # Optimize study with objective function
+    # # Optimize study with objective function
     study.optimize(objective_forces_valley, n_trials=trials)
 
     # Print best result and parameter values:
@@ -539,9 +606,23 @@ def train_forces_valley(trials):
         print(f"    {key}: {value}")
     
     # Draw visualizations
-    optuna.visualization.plot_slice(study, params=['force_00', 'force_01']).show()
-    optuna.visualization.plot_param_importances(study, params=['force_00', 'force_01']).show()
-  
+    optuna.visualization.plot_parallel_coordinate(study, params=['force_00', 'force_01', 'Particles']).show()
+    
+    # Create study for zero gravity simulation
+    study2 = optuna.create_study(
+        direction='maximize', 
+        storage="sqlite:///db.sqlite3", 
+        study_name="Valley_ZeroG", 
+        load_if_exists=True
+        )
+    
+    # Optimize study with objective function
+    study2.optimize(objective_forces_valley_zeroG, n_trials=100)
+    
+    # Draw visualizations
+    optuna.visualization.plot_parallel_coordinate(study2, params=['force_00', 'force_01', 'Particles']).show()
+    
+    
   
 # Training function for box map    
 def train_clusterization_box(trials):
